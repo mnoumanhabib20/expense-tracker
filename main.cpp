@@ -14,6 +14,9 @@ const int MAX_USERS = 10;
 // Set the starting number of habits for a new account.
 const int STARTING_HABITS = 5;
 
+// Keep the seven most recent finished-day scores for each account.
+const int WEEK_DAYS = 7;
+
 // Set the productivity percentage needed to keep a streak.
 const double STREAK_TARGET = 80.0;
 
@@ -46,6 +49,12 @@ int userBestStreak[MAX_USERS];
 
 // Store each user's number of logged days.
 int userDaysLogged[MAX_USERS];
+
+// Store each user's seven most recent productivity scores.
+double userWeeklyScores[MAX_USERS][WEEK_DAYS];
+
+// Store each user's completed focus minutes for the same seven days.
+int userWeeklyMinutes[MAX_USERS][WEEK_DAYS];
 
 // Track how many accounts currently exist.
 int userCount = 0;
@@ -571,6 +580,14 @@ void signUp()
         userHabitDone[userCount][i] = false;
     }
 
+    // Start the weekly chart with seven empty scores.
+    for (int i = 0; i < WEEK_DAYS; i++)
+    {
+        // Set this day's score and minutes to zero.
+        userWeeklyScores[userCount][i] = 0.0;
+        userWeeklyMinutes[userCount][i] = 0;
+    }
+
     // Set this account's initial habit and streak totals.
     userHabitCount[userCount] = STARTING_HABITS;
     userCurrentStreak[userCount] = 0;
@@ -706,6 +723,14 @@ void deleteUserAccount(int userChoice)
         userBestStreak[i] = userBestStreak[i + 1];
         userDaysLogged[i] = userDaysLogged[i + 1];
 
+        // Copy that account's recent score history.
+        for (int j = 0; j < WEEK_DAYS; j++)
+        {
+            // Shift the matching score and minute totals.
+            userWeeklyScores[i][j] = userWeeklyScores[i + 1][j];
+            userWeeklyMinutes[i][j] = userWeeklyMinutes[i + 1][j];
+        }
+
         // Copy every habit field for that account.
         for (int j = 0; j < MAX_HABITS; j++)
         {
@@ -733,6 +758,14 @@ void deleteUserAccount(int userChoice)
     userCurrentStreak[userCount] = 0;
     userBestStreak[userCount] = 0;
     userDaysLogged[userCount] = 0;
+
+    // Clear the removed account's score history.
+    for (int j = 0; j < WEEK_DAYS; j++)
+    {
+        // Remove the old score and minute totals.
+        userWeeklyScores[userCount][j] = 0.0;
+        userWeeklyMinutes[userCount][j] = 0;
+    }
 
     // Clear every habit value from the unused account slot.
     for (int j = 0; j < MAX_HABITS; j++)
@@ -1187,6 +1220,16 @@ void viewAnalytics()
         // Print the empty pending message.
         cout << "No pending habits.\n";
     }
+
+    // Print the recent finished-day scores and minutes for chart data.
+    cout << "Recent finished-day data, oldest to newest:\n";
+    for (int i = WEEK_DAYS - 1; i >= 0; i--)
+    {
+        // Show one day's score and completed focus minutes.
+        cout << userWeeklyScores[activeUserIndex][i] << "% / "
+             << userWeeklyMinutes[activeUserIndex][i] << " min; ";
+    }
+    cout << "\n";
 }
 
 // recursive void; called by viewAnalytics; prints pending habits one index at a time.
@@ -1217,9 +1260,25 @@ void finishDay()
     // Calculate this user's score before resetting habits.
     double score = calculateProductivityScore(userHabitDone[activeUserIndex],
                                               userHabitCount[activeUserIndex]);
+    // Calculate focus minutes earned on this user's day.
+    int completedMinutes = calculateCompletedMinutes(
+        userHabitMinutes[activeUserIndex], userHabitDone[activeUserIndex],
+        userHabitCount[activeUserIndex]);
 
     // Count this user's finished day.
     userDaysLogged[activeUserIndex]++;
+
+    // Shift older scores one place to make room for today.
+    for (int i = WEEK_DAYS - 1; i > 0; i--)
+    {
+        // Copy the preceding score and minutes into this position.
+        userWeeklyScores[activeUserIndex][i] = userWeeklyScores[activeUserIndex][i - 1];
+        userWeeklyMinutes[activeUserIndex][i] = userWeeklyMinutes[activeUserIndex][i - 1];
+    }
+
+    // Store today's score and focus minutes at the newest position.
+    userWeeklyScores[activeUserIndex][0] = score;
+    userWeeklyMinutes[activeUserIndex][0] = completedMinutes;
 
     // Continue this user's streak when the score meets the target.
     if (score >= STREAK_TARGET)
@@ -1244,8 +1303,9 @@ void finishDay()
     // Reset only this user's completion flags.
     resetDailyHabits(userHabitDone[activeUserIndex], userHabitCount[activeUserIndex]);
 
-    // Report the score evaluated for this user's day.
-    cout << "Day logged at " << score << "%.\n";
+    // Report this user's score and focus minutes for the day.
+    cout << "Day logged at " << score << "% with "
+         << completedMinutes << " focus minutes.\n";
 }
 
 // void; called by finishDay; clears one user's completion flags.

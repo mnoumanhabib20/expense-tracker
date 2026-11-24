@@ -4,9 +4,13 @@ const MAX_HABITS = 6;
 // Set the score needed to keep a daily streak.
 const STREAK_TARGET = 80;
 
+// Set the number of weekdays shown in each chart.
+const WEEK_DAYS = 7;
+
 // Use separate browser storage keys for accounts and the admin password.
 const USERS_STORAGE_KEY = "habitTrackerUsers";
 const ADMIN_STORAGE_KEY = "habitTrackerAdminPassword";
+const ACTIVE_USER_STORAGE_KEY = "habitTrackerActiveUser";
 
 // Keep the required first-run admin password for this class demo.
 const DEFAULT_ADMIN_PASSWORD = "146524";
@@ -21,6 +25,15 @@ const savedUsersText = localStorage.getItem(USERS_STORAGE_KEY);
 if (savedUsersText !== null) {
     // Turn the saved text into the user array.
     users = JSON.parse(savedUsersText);
+}
+
+// Store the weekday names in chart order from Monday to Sunday.
+const WEEKDAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+// Prepare saved user data for the current Monday-to-Sunday chart.
+for (let i = 0; i < users.length; i++) {
+    // Reset chart arrays when the saved week is old or incomplete.
+    prepareWeeklyData(users[i], new Date());
 }
 
 // Read the saved administrator password.
@@ -39,11 +52,14 @@ else {
     localStorage.setItem(ADMIN_STORAGE_KEY, adminPassword);
 }
 
-// Keep the user's email that is currently signed in.
-let activeUserEmail = "";
+// Restore the signed-in user for this browser tab after a refresh.
+let activeUserEmail = sessionStorage.getItem(ACTIVE_USER_STORAGE_KEY) || "";
 
 // Track whether the administrator has unlocked the admin panel.
 let adminLoggedIn = false;
+
+// Remember which dashboard section the user selected.
+let currentSection = "home";
 
 // Find the sign-up and login tab buttons.
 const showSignupButton = document.getElementById("show-signup");
@@ -68,20 +84,42 @@ const loginMessage = document.getElementById("login-message");
 const authView = document.getElementById("auth-view");
 const userView = document.getElementById("user-view");
 const adminView = document.getElementById("admin-view");
+const homeSection = document.getElementById("home-section");
+const statsSection = document.getElementById("stats-section");
+const settingsSection = document.getElementById("settings-section");
+const timeGreetingText = document.getElementById("time-greeting");
 
 // Find the user dashboard title and logout button.
 const currentUserNameText = document.getElementById("current-user-name");
 const userLogoutButton = document.getElementById("user-logout");
+const settingsAccountNameText = document.getElementById("settings-account-name");
+const settingsAccountEmailText = document.getElementById("settings-account-email");
+const profileCard = document.getElementById("profile-card");
+
+// Find the desktop and mobile navigation buttons.
+const navHomeButton = document.getElementById("nav-home");
+const navStatsButton = document.getElementById("nav-stats");
+const navSettingsButton = document.getElementById("nav-settings");
+const mobileNavHomeButton = document.getElementById("mobile-nav-home");
+const mobileNavStatsButton = document.getElementById("mobile-nav-stats");
+const mobileNavSettingsButton = document.getElementById("mobile-nav-settings");
+const mobileSettingsButton = document.getElementById("mobile-settings-button");
 
 // Find the add-habit form, fields, and feedback message.
 const habitForm = document.getElementById("habit-form");
 const habitNameInput = document.getElementById("habit-input");
 const targetMinutesInput = document.getElementById("target-minutes-input");
 const habitMessage = document.getElementById("habit-message");
+const addHabitButton = document.getElementById("add-habit-button");
+const addHabitPanel = document.getElementById("add-habit-panel");
 
 // Find the active user's status message and habit count.
 const userStatusMessage = document.getElementById("user-status-message");
 const userHabitCountText = document.getElementById("user-habit-count");
+const todayHabitsSummaryText = document.getElementById("today-habits-summary");
+const todayProgressSummaryText = document.getElementById("today-progress-summary");
+const currentStreakSummaryText = document.getElementById("current-streak-summary");
+const bestStreakSummaryText = document.getElementById("best-streak-summary");
 
 // Find the user's score values.
 const scoreCompletedText = document.getElementById("score-completed");
@@ -100,8 +138,17 @@ const pendingBreakdownText = document.getElementById("smart-breakdown");
 
 // Find the timer, finish-day button, and habit list.
 const resetCountdownText = document.getElementById("reset-countdown");
+const statsResetCountdownText = document.getElementById("stats-reset-countdown");
 const finishDayButton = document.getElementById("finish-day-button");
 const habitList = document.getElementById("habit-list");
+const weeklyChart = document.getElementById("weekly-chart");
+const homeChartMetricSelect = document.getElementById("home-chart-metric");
+const homeChartDetailText = document.getElementById("home-chart-detail");
+const statsChartViewSelect = document.getElementById("stats-chart-view");
+const statsChartMetricSelect = document.getElementById("stats-chart-metric");
+const statsChart = document.getElementById("stats-chart");
+const statsChartDetailText = document.getElementById("stats-chart-detail");
+const weeklyTotalMinutesText = document.getElementById("weekly-total-minutes");
 
 // Find the admin login form and its password field.
 const adminLoginForm = document.getElementById("admin-login-form");
@@ -346,6 +393,143 @@ function getDateKey(date) {
     return date.getFullYear() + "-" + (date.getMonth() + 1) + "-" + date.getDate();
 }
 
+// Return the Monday date key for the week containing a date.
+function getWeekStartKey(date) {
+    // Copy the date so the caller's value stays unchanged.
+    const monday = new Date(date.getTime());
+
+    // Remove the time before calculating the weekday.
+    monday.setHours(0, 0, 0, 0);
+
+    // Find how many days to move backward to Monday.
+    const daysAfterMonday = (monday.getDay() + 6) % WEEK_DAYS;
+    monday.setDate(monday.getDate() - daysAfterMonday);
+
+    // Return the local Monday as a simple key.
+    return getDateKey(monday);
+}
+
+// Return the position of a date from Monday zero to Sunday six.
+function getWeekDayIndex(date) {
+    // Convert Sunday-first dates to Monday-first chart positions.
+    return (date.getDay() + 6) % WEEK_DAYS;
+}
+
+// Turn a saved local date key back into a date value.
+function getDateFromKey(dateKey) {
+    // Split the year, month, and day into simple pieces.
+    const dateParts = dateKey.split("-");
+
+    // Create the date in local time rather than UTC.
+    return new Date(Number(dateParts[0]), Number(dateParts[1]) - 1, Number(dateParts[2]));
+}
+
+// Prepare seven progress and focus-minute values for one local week.
+function prepareWeeklyData(user, date) {
+    // Find the Monday key for this selected date.
+    const weekStart = getWeekStartKey(date);
+
+    // Reset both metric arrays for a new or incomplete week.
+    if (user.weekStart !== weekStart
+        || !Array.isArray(user.weeklyScores)
+        || user.weeklyScores.length !== WEEK_DAYS) {
+        // Keep this user's chart on the current week only.
+        user.weekStart = weekStart;
+        user.weeklyScores = [0, 0, 0, 0, 0, 0, 0];
+        user.weeklyMinutes = [0, 0, 0, 0, 0, 0, 0];
+    }
+
+    // Create minute values for accounts saved before the chart update.
+    if (!Array.isArray(user.weeklyMinutes) || user.weeklyMinutes.length !== WEEK_DAYS) {
+        // Start old accounts with seven empty minute totals.
+        user.weeklyMinutes = [0, 0, 0, 0, 0, 0, 0];
+    }
+
+    // Treat older accounts as having an unfinished current day.
+    if (typeof user.dayFinished !== "boolean") {
+        // Start the new finish marker as false.
+        user.dayFinished = false;
+    }
+}
+
+// Update today's chart bar from the active habit states.
+function updateWeeklyToday(user) {
+    // Find today's date and weekday chart position.
+    const today = new Date();
+    const todayKey = getDateKey(today);
+    const dayIndex = getWeekDayIndex(today);
+
+    // Prepare this user's arrays for the current calendar week.
+    prepareWeeklyData(user, today);
+
+    // Keep the finished score visible until the user changes a habit.
+    if (user.dayFinished && user.lastFinishedDate === todayKey) {
+        // Report that no new chart values need saving.
+        return false;
+    }
+
+    // Calculate today's live progress and completed focus minutes.
+    const score = calculateProductivityScore(user);
+    const minutes = calculateCompletedMinutes(user);
+    let changed = false;
+
+    // Save today's percentage when it has changed.
+    if (user.weeklyScores[dayIndex] !== score) {
+        // Update only this weekday's score.
+        user.weeklyScores[dayIndex] = score;
+        changed = true;
+    }
+
+    // Save today's minutes when they have changed.
+    if (user.weeklyMinutes[dayIndex] !== minutes) {
+        // Update only this weekday's focus minutes.
+        user.weeklyMinutes[dayIndex] = minutes;
+        changed = true;
+    }
+
+    // Tell the caller whether the account needs saving.
+    return changed;
+}
+
+// Return the greeting that matches the user's local time.
+function getTimeGreeting(date) {
+    // Read the current hour from the browser's local clock.
+    const hour = date.getHours();
+
+    // Use the night greeting before five or from nine onward.
+    if (hour < 5 || hour >= 21) {
+        // Return the overnight greeting.
+        return "Good Night";
+    }
+
+    // Use the morning greeting before noon.
+    if (hour < 12) {
+        // Return the morning greeting.
+        return "Good Morning";
+    }
+
+    // Use the afternoon greeting until five.
+    if (hour < 17) {
+        // Return the afternoon greeting.
+        return "Good Afternoon";
+    }
+
+    // Use the evening greeting from five until nine.
+    if (hour < 21) {
+        // Return the evening greeting.
+        return "Good Evening";
+    }
+
+    // Keep a final fallback for clear control flow.
+    return "Good Night";
+}
+
+// Update the greeting using the current local time.
+function updateTimeGreeting() {
+    // Show the correct greeting for this moment.
+    timeGreetingText.textContent = getTimeGreeting(new Date());
+}
+
 // Return local midnight after a chosen number of calendar days.
 function getMidnightAfterDays(startDate, daysToAdd) {
     // Copy the date so the caller's value stays unchanged.
@@ -361,10 +545,20 @@ function getMidnightAfterDays(startDate, daysToAdd) {
     return resetDate.getTime();
 }
 
-// Update one user's day count and streak values.
-function recordFinishedDay(user, score, dateKey) {
+// Update one user's daily totals, weekly chart, and streak values.
+function recordFinishedDay(user, score, minutes, dateKey) {
     // Count the finished day for this user.
     user.totalDaysLogged++;
+
+    // Find the calendar weekday that was finished.
+    const finishedDate = getDateFromKey(dateKey);
+    const dayIndex = getWeekDayIndex(finishedDate);
+    prepareWeeklyData(user, finishedDate);
+
+    // Save the finished score and minutes in that weekday's chart slots.
+    user.weeklyScores[dayIndex] = score;
+    user.weeklyMinutes[dayIndex] = minutes;
+    user.dayFinished = true;
 
     // Keep the streak when the score meets the target.
     if (score >= STREAK_TARGET) {
@@ -421,9 +615,10 @@ function finishActiveUserDay() {
 
     // Save today's score before clearing the habit flags.
     const score = calculateProductivityScore(user);
+    const completedMinutes = calculateCompletedMinutes(user);
 
     // Update this user's streak, day count, and last finished date.
-    recordFinishedDay(user, score, todayKey);
+    recordFinishedDay(user, score, completedMinutes, todayKey);
 
     // Clear this user's habits so the next day can begin.
     resetDailyHabits(user);
@@ -453,9 +648,10 @@ function applyAutomaticReset(user) {
 
     // Calculate the score for this user's day before clearing it.
     const score = calculateProductivityScore(user);
+    const completedMinutes = calculateCompletedMinutes(user);
 
     // Record the user's previous day and streak result.
-    recordFinishedDay(user, score, getDateKey(finishedDate));
+    recordFinishedDay(user, score, completedMinutes, getDateKey(finishedDate));
 
     // Clear only this user's habit completion states.
     resetDailyHabits(user);
@@ -501,8 +697,9 @@ function updateResetTimer() {
     // Show instructions when this user has no reset scheduled.
     if (user.nextResetTime === 0) {
         // Explain how the first automatic reset is scheduled.
-        document.getElementById("reset-countdown").textContent =
-            "Finish Day to schedule the automatic reset after tomorrow, not tonight.";
+        const countdownMessage = "Finish Day to schedule the automatic reset after tomorrow, not tonight.";
+        resetCountdownText.textContent = countdownMessage;
+        statsResetCountdownText.textContent = countdownMessage;
         return;
     }
 
@@ -522,8 +719,10 @@ function updateResetTimer() {
     const seconds = secondsRemaining % 60;
 
     // Display the countdown to this user's reset time.
-    document.getElementById("reset-countdown").textContent = "Automatic reset in "
+    const countdownMessage = "Automatic reset in "
         + days + "d " + hours + "h " + minutes + "m " + seconds + "s (12:00 AM local time).";
+    resetCountdownText.textContent = countdownMessage;
+    statsResetCountdownText.textContent = countdownMessage;
 }
 
 // Remove a user's habit and shift its matching parallel arrays.
@@ -544,6 +743,7 @@ function deleteHabit(user, habitIndex) {
     user.habitNames.pop();
     user.habitMinutes.pop();
     user.habitDone.pop();
+    user.dayFinished = false;
 
     // Confirm and save the deletion.
     user.statusMessage = "Habit deleted.";
@@ -570,6 +770,10 @@ function renderHabitList(user) {
             habitItem.className = "habit-item completed";
         }
 
+        // Create a group for the name and target details.
+        const detailGroup = document.createElement("div");
+        detailGroup.className = "habit-detail";
+
         // Create the habit name element.
         const nameText = document.createElement("span");
 
@@ -583,7 +787,7 @@ function renderHabitList(user) {
         const detailText = document.createElement("span");
 
         // Apply the target detail style.
-        detailText.className = "habit-detail";
+        detailText.className = "habit-minutes";
 
         // Show this habit's target.
         detailText.textContent = user.habitMinutes[i] + " min target";
@@ -592,12 +796,11 @@ function renderHabitList(user) {
         const statusBadge = document.createElement("span");
 
         // Apply the standard pending badge style.
-        statusBadge.className = "habit-status";
+        statusBadge.className = "status-badge";
 
         // Choose the badge state from this user's habit flag.
         if (user.habitDone[i]) {
             // Show a green done badge.
-            statusBadge.className = "habit-status completed-status";
             statusBadge.textContent = "Done";
         }
         // Show pending when this habit is not done.
@@ -640,6 +843,7 @@ function renderHabitList(user) {
         toggleButton.addEventListener("click", function () {
             // Flip this user's selected completion flag.
             user.habitDone[i] = !user.habitDone[i];
+            user.dayFinished = false;
 
             // Confirm the status change.
             user.statusMessage = "Habit status updated.";
@@ -655,9 +859,10 @@ function renderHabitList(user) {
             deleteHabit(user, i);
         });
 
-        // Add the name, target, status, and actions to the row.
-        habitItem.appendChild(nameText);
-        habitItem.appendChild(detailText);
+        // Put the name and target in one aligned details column.
+        detailGroup.appendChild(nameText);
+        detailGroup.appendChild(detailText);
+        habitItem.appendChild(detailGroup);
         habitItem.appendChild(statusBadge);
         habitItem.appendChild(toggleButton);
         habitItem.appendChild(deleteButton);
@@ -665,6 +870,274 @@ function renderHabitList(user) {
         // Add this user's completed row to the page.
         habitList.appendChild(habitItem);
     }
+}
+
+// Show the selected dashboard section and update both navigation bars.
+function showSection(sectionName) {
+    // Keep an unsigned admin route inside the settings section.
+    if (getActiveUser() === null && sectionName !== "settings") {
+        // Do not open private dashboard sections without an account.
+        sectionName = "settings";
+    }
+
+    // Remember the selected section for the next dashboard refresh.
+    currentSection = sectionName;
+    homeSection.hidden = sectionName !== "home";
+    statsSection.hidden = sectionName !== "stats";
+    settingsSection.hidden = sectionName !== "settings";
+    adminView.hidden = sectionName !== "settings";
+
+    // Match the desktop and mobile active navigation styles.
+    navHomeButton.className = sectionName === "home" ? "nav-button active" : "nav-button";
+    navStatsButton.className = sectionName === "stats" ? "nav-button active" : "nav-button";
+    navSettingsButton.className = sectionName === "settings" ? "nav-button active" : "nav-button";
+    mobileNavHomeButton.className = sectionName === "home" ? "mobile-nav-button active" : "mobile-nav-button";
+    mobileNavStatsButton.className = sectionName === "stats" ? "mobile-nav-button active" : "mobile-nav-button";
+    mobileNavSettingsButton.className = sectionName === "settings" ? "mobile-nav-button active" : "mobile-nav-button";
+
+    // Show account details only when a user is signed in.
+    const user = getActiveUser();
+    profileCard.hidden = user === null;
+
+    // Refresh the settings identity and admin access controls.
+    if (user !== null) {
+        // Display only the active user's own account details.
+        settingsAccountNameText.textContent = user.name;
+        settingsAccountEmailText.textContent = user.email;
+    }
+
+    // Keep admin login and account controls inside Settings.
+    adminLoginForm.hidden = adminLoggedIn;
+    adminPanel.hidden = !adminLoggedIn;
+}
+
+// Add one clickable bar with a hover label to a chart.
+function addChartBar(chart, label, value, maximum, metric, tooltip, isToday, showDetails) {
+    // Create a column that holds the value, bar, and day label.
+    const column = document.createElement("div");
+    column.className = "chart-column";
+
+    // Show the value above the bar in the selected measure.
+    const valueLabel = document.createElement("span");
+    valueLabel.className = "chart-value";
+    valueLabel.textContent = metric === "minutes" ? Math.round(value) + "m" : Math.round(value) + "%";
+
+    // Create a button so each bar can be inspected with a click.
+    const barButton = document.createElement("button");
+    barButton.className = "chart-bar-button";
+    barButton.type = "button";
+    barButton.title = tooltip;
+    barButton.setAttribute("aria-label", tooltip);
+
+    // Create the colored bar and scale it to the chart maximum.
+    const barFill = document.createElement("span");
+    barFill.className = isToday ? "chart-bar-fill latest-score" : "chart-bar-fill";
+    const barHeight = maximum > 0 ? value / maximum * 100 : 0;
+    barFill.style.height = barHeight + "%";
+    barButton.appendChild(barFill);
+
+    // Show the short day or habit label below the bar.
+    const dayLabel = document.createElement("span");
+    dayLabel.className = "chart-label";
+    dayLabel.textContent = label;
+
+    // Show this bar's complete information when it is selected.
+    barButton.addEventListener("click", showDetails);
+
+    // Add each chart part in reading order.
+    column.appendChild(valueLabel);
+    column.appendChild(barButton);
+    column.appendChild(dayLabel);
+    chart.appendChild(column);
+}
+
+// Draw a Monday-to-Sunday chart for progress or focus minutes.
+function renderWeeklyChart(user) {
+    // Remove the previous chart bars.
+    weeklyChart.textContent = "";
+
+    // Read the home chart's selected measure.
+    const metric = homeChartMetricSelect.value;
+    let maximum = metric === "minutes" ? calculateTotalMinutes(user) : 100;
+    const weekStart = getDateFromKey(user.weekStart);
+
+    // Scale minute bars to the largest value in this week's chart.
+    if (metric === "minutes") {
+        // Check every weekday for a value above today's target.
+        for (let i = 0; i < WEEK_DAYS; i++) {
+            // Keep historical values visible after target changes.
+            if (user.weeklyMinutes[i] > maximum) {
+                // Raise the scale to fit this day's minutes.
+                maximum = user.weeklyMinutes[i];
+            }
+        }
+        // Keep an empty minute chart safe from division by zero.
+        if (maximum < 1) {
+            // Use one minute as the smallest safe chart scale.
+            maximum = 1;
+        }
+    }
+
+    // Add one chart bar for each day from Monday through Sunday.
+    for (let i = 0; i < WEEK_DAYS; i++) {
+        // Calculate the calendar date for this bar.
+        const chartDate = new Date(weekStart.getTime());
+        chartDate.setDate(chartDate.getDate() + i);
+
+        // Read this weekday's saved score and focus minutes.
+        const score = user.weeklyScores[i];
+        const minutes = user.weeklyMinutes[i];
+        const value = metric === "minutes" ? minutes : score;
+        const dateLabel = (chartDate.getMonth() + 1) + "/" + chartDate.getDate();
+        const tooltip = WEEKDAY_NAMES[i] + " " + dateLabel + ": "
+            + score.toFixed(1) + "% progress, " + minutes + " focus minutes";
+
+        // Show both measures for the day selected by the user.
+        const showDetails = function () {
+            homeChartDetailText.textContent = WEEKDAY_NAMES[i] + " " + dateLabel + ": "
+                + score.toFixed(1) + "% progress | " + minutes + " focus minutes.";
+        };
+
+        // Draw the weekday bar and connect its detail action.
+        addChartBar(weeklyChart, WEEKDAY_NAMES[i], value, maximum, metric,
+            tooltip, i === getWeekDayIndex(new Date()), showDetails);
+    }
+
+    // Show today's details when the chart first appears.
+    const todayIndex = getWeekDayIndex(new Date());
+    const todayDate = new Date();
+    const todayLabel = (todayDate.getMonth() + 1) + "/" + todayDate.getDate();
+    homeChartDetailText.textContent = WEEKDAY_NAMES[todayIndex] + " " + todayLabel + ": "
+        + user.weeklyScores[todayIndex].toFixed(1) + "% progress | "
+        + user.weeklyMinutes[todayIndex] + " focus minutes.";
+}
+
+// Draw the selected weekly chart or today's habit comparison.
+function renderStatsChart(user) {
+    // Clear the old bars before drawing the chosen view.
+    statsChart.textContent = "";
+
+    // Read the selected chart view and measure.
+    const chartView = statsChartViewSelect.value;
+    const metric = statsChartMetricSelect.value;
+
+    // Draw the weekly view with one bar for each calendar day.
+    if (chartView === "week") {
+        // Use the standard seven weekday columns.
+        statsChart.className = "stats-chart";
+        const weekStart = getDateFromKey(user.weekStart);
+        let maximum = metric === "minutes" ? calculateTotalMinutes(user) : 100;
+        let weeklyMinutes = 0;
+
+        // Scale minute bars to the largest value in this week's chart.
+        if (metric === "minutes") {
+            // Check every weekday for a value above today's target.
+            for (let i = 0; i < WEEK_DAYS; i++) {
+                // Keep historical values visible after target changes.
+                if (user.weeklyMinutes[i] > maximum) {
+                    // Raise the scale to fit this day's minutes.
+                    maximum = user.weeklyMinutes[i];
+                }
+            }
+            // Keep an empty minute chart safe from division by zero.
+            if (maximum < 1) {
+                // Use one minute as the smallest safe chart scale.
+                maximum = 1;
+            }
+        }
+
+        // Add Monday through Sunday to the chart.
+        for (let i = 0; i < WEEK_DAYS; i++) {
+            // Read this weekday's date and stored values.
+            const chartDate = new Date(weekStart.getTime());
+            chartDate.setDate(chartDate.getDate() + i);
+            const score = user.weeklyScores[i];
+            const minutes = user.weeklyMinutes[i];
+            const value = metric === "minutes" ? minutes : score;
+            const dateLabel = (chartDate.getMonth() + 1) + "/" + chartDate.getDate();
+            const tooltip = WEEKDAY_NAMES[i] + " " + dateLabel + ": "
+                + score.toFixed(1) + "% progress, " + minutes + " focus minutes";
+
+            // Add this day's minutes to the weekly total.
+            weeklyMinutes = weeklyMinutes + minutes;
+
+            // Show both measures for the day selected by the user.
+            const showDetails = function () {
+                statsChartDetailText.textContent = WEEKDAY_NAMES[i] + " " + dateLabel + ": "
+                    + score.toFixed(1) + "% progress | " + minutes + " focus minutes.";
+            };
+
+            // Draw the weekday bar and connect its detail action.
+            addChartBar(statsChart, WEEKDAY_NAMES[i], value, maximum, metric,
+                tooltip, i === getWeekDayIndex(new Date()), showDetails);
+        }
+
+        // Show the total number of focus minutes for this week.
+        weeklyTotalMinutesText.textContent = "Focus minutes this week: " + weeklyMinutes;
+        // Show today's details when the weekly chart first appears.
+        const todayIndex = getWeekDayIndex(new Date());
+        const todayDate = new Date();
+        const todayLabel = (todayDate.getMonth() + 1) + "/" + todayDate.getDate();
+        statsChartDetailText.textContent = WEEKDAY_NAMES[todayIndex] + " " + todayLabel + ": "
+            + user.weeklyScores[todayIndex].toFixed(1) + "% progress | "
+            + user.weeklyMinutes[todayIndex] + " focus minutes.";
+        return;
+    }
+
+    // Use one bar for each habit in today's comparison.
+    statsChart.className = "stats-chart daily-chart";
+    weeklyTotalMinutesText.textContent = "Today's completed focus minutes: "
+        + calculateCompletedMinutes(user);
+
+    // Explain when there are no habits to compare.
+    if (user.habitNames.length === 0) {
+        // Show a friendly empty chart message.
+        statsChart.textContent = "Add a habit to see today's comparison.";
+        statsChartDetailText.textContent = "There are no habits to inspect.";
+        return;
+    }
+
+    // Find a useful maximum for the selected habit measure.
+    let maximum = metric === "minutes" ? calculateTotalMinutes(user) : 100;
+    if (maximum < 1) {
+        // Keep all bars safe when target minutes are zero.
+        maximum = 1;
+    }
+
+    // Add a progress or focus-minute bar for every habit.
+    for (let i = 0; i < user.habitNames.length; i++) {
+        // Use one hundred percent for done habits and zero for pending.
+        const score = user.habitDone[i] ? 100 : 0;
+        const minutes = user.habitDone[i] ? user.habitMinutes[i] : 0;
+        const value = metric === "minutes" ? minutes : score;
+        const label = "H" + (i + 1);
+        const tooltip = user.habitNames[i] + ": "
+            + (user.habitDone[i] ? "Done" : "Pending") + ", "
+            + user.habitMinutes[i] + " target minutes";
+
+        // Show this habit's full information when its bar is selected.
+        const showDetails = function () {
+            statsChartDetailText.textContent = user.habitNames[i] + ": "
+                + (user.habitDone[i] ? "Done" : "Pending") + " | "
+                + minutes + " of " + user.habitMinutes[i] + " focus minutes.";
+        };
+
+        // Draw the habit bar and connect its detail action.
+        addChartBar(statsChart, label, value, maximum, metric,
+            tooltip, user.habitDone[i], showDetails);
+    }
+
+    // Show a helpful initial detail for the first habit.
+    statsChartDetailText.textContent = "Select a habit bar to inspect its status and target.";
+}
+
+// Draw both charts and calculate a weekly focus-minute total.
+function renderCharts(user) {
+    // Refresh the Home chart for the selected measure.
+    renderWeeklyChart(user);
+
+    // Refresh the Stats chart for its selected view and measure.
+    renderStatsChart(user);
 }
 
 // Render the signed-in user's own dashboard and data.
@@ -685,17 +1158,28 @@ function renderUserView() {
         applyAutomaticReset(user);
     }
 
-    // Show only the user dashboard.
+    // Show only this user's dashboard.
     authView.hidden = true;
     userView.hidden = false;
-    adminView.hidden = true;
 
     // Show this account's name and habit count.
     currentUserNameText.textContent = user.name;
     userHabitCountText.textContent = user.habitNames.length + " of " + MAX_HABITS + " habits";
+    settingsAccountNameText.textContent = user.name;
+    settingsAccountEmailText.textContent = user.email;
 
     // Show this user's current status message.
     userStatusMessage.textContent = user.statusMessage || "";
+
+    // Keep today's chart values current before drawing the dashboard.
+    const weeklyDataChanged = updateWeeklyToday(user);
+    if (weeklyDataChanged) {
+        // Save today's live chart values to this browser.
+        saveUsers();
+    }
+
+    // Refresh the greeting whenever the dashboard is rendered.
+    updateTimeGreeting();
 
     // Calculate this user's score and minute totals.
     const completedCount = countCompletedHabits(user);
@@ -705,16 +1189,20 @@ function renderUserView() {
 
     // Display the completed habit count.
     scoreCompletedText.textContent = completedCount + " / " + user.habitNames.length;
+    todayHabitsSummaryText.textContent = completedCount + " / " + user.habitNames.length;
 
     // Display completed focus minutes against the user's target.
     scoreMinutesText.textContent = completedMinutes + " / " + totalMinutes;
 
     // Display the productivity percentage.
     scorePercentageText.textContent = productivityScore.toFixed(1) + "%";
+    todayProgressSummaryText.textContent = productivityScore.toFixed(1) + "%";
 
     // Display the user's current and best streaks.
     currentStreakText.textContent = user.currentStreak + " days";
     bestStreakText.textContent = user.bestStreak + " days";
+    currentStreakSummaryText.textContent = user.currentStreak;
+    bestStreakSummaryText.textContent = user.bestStreak;
 
     // Display the user's logged day count.
     daysLoggedText.textContent = user.totalDaysLogged;
@@ -751,6 +1239,10 @@ function renderUserView() {
 
     // Draw only the active user's habit rows.
     renderHabitList(user);
+    renderCharts(user);
+
+    // Keep the correct section selected after an action or refresh.
+    showSection(currentSection);
 
     // Refresh the countdown for this user's saved reset time.
     updateResetTimer();
@@ -758,9 +1250,13 @@ function renderUserView() {
 
 // Render the protected admin login or account management panel.
 function renderAdminView() {
-    // Show the admin route and hide user and authentication views.
+    // Keep admin tools in Settings instead of creating another page.
     authView.hidden = true;
-    userView.hidden = true;
+    userView.hidden = false;
+    // Find the signed-in account for the dashboard greeting.
+    const activeUser = getActiveUser();
+    currentUserNameText.textContent = activeUser === null ? "Guest" : activeUser.name;
+    showSection("settings");
     adminView.hidden = false;
 
     // Show the password form until the admin is authenticated.
@@ -816,6 +1312,7 @@ function renderAdminView() {
                 if (activeUserEmail === deletedEmail) {
                     // Clear the active user's email.
                     activeUserEmail = "";
+                    sessionStorage.removeItem(ACTIVE_USER_STORAGE_KEY);
                 }
 
                 // Save the account deletion.
@@ -837,6 +1334,13 @@ function renderAdminView() {
 
 // Render sign-up, login, user, or admin according to the current route.
 function renderPage() {
+    // Clear a tab session when its saved account no longer exists.
+    if (activeUserEmail !== "" && findUserIndex(activeUserEmail) === -1) {
+        // Remove the stale account email from this tab.
+        activeUserEmail = "";
+        sessionStorage.removeItem(ACTIVE_USER_STORAGE_KEY);
+    }
+
     // Show the admin view only on the protected hash route.
     if (window.location.hash === "#/admin") {
         // Display the admin password form or unlocked panel.
@@ -854,7 +1358,6 @@ function renderPage() {
     // Show the account forms when no user is signed in.
     authView.hidden = false;
     userView.hidden = true;
-    adminView.hidden = true;
 }
 
 // Show the chosen sign-up or login form.
@@ -926,6 +1429,10 @@ signupForm.addEventListener("submit", function (event) {
         currentStreak: 0,
         bestStreak: 0,
         totalDaysLogged: 0,
+        weeklyScores: [0, 0, 0, 0, 0, 0, 0],
+        weekStart: getWeekStartKey(new Date()),
+        weeklyMinutes: [0, 0, 0, 0, 0, 0, 0],
+        dayFinished: false,
         lastFinishedDate: "",
         nextResetTime: 0,
         statusMessage: "Welcome! Your habits are private to this account."
@@ -936,6 +1443,7 @@ signupForm.addEventListener("submit", function (event) {
 
     // Sign in the new account.
     activeUserEmail = email;
+    sessionStorage.setItem(ACTIVE_USER_STORAGE_KEY, email);
 
     // Save the account and display its own dashboard.
     saveUsers();
@@ -960,6 +1468,7 @@ loginForm.addEventListener("submit", function (event) {
     if (userIndex >= 0 && users[userIndex].password === password) {
         // Set the active account email.
         activeUserEmail = users[userIndex].email;
+        sessionStorage.setItem(ACTIVE_USER_STORAGE_KEY, activeUserEmail);
 
         // Clear an old login error.
         loginMessage.textContent = "";
@@ -1021,10 +1530,12 @@ habitForm.addEventListener("submit", function (event) {
     user.habitNames.push(name);
     user.habitMinutes.push(targetMinutes);
     user.habitDone.push(false);
+    user.dayFinished = false;
 
     // Confirm the saved habit and its target.
     user.statusMessage = "Habit added with a " + targetMinutes + "-minute target.";
     habitMessage.textContent = user.statusMessage;
+    addHabitPanel.hidden = true;
 
     // Clear the form fields for another habit.
     habitNameInput.value = "";
@@ -1039,6 +1550,80 @@ habitForm.addEventListener("submit", function (event) {
 finishDayButton.addEventListener("click", function () {
     // Score the user's day and schedule its automatic reset.
     finishActiveUserDay();
+});
+
+// Show or hide the new-habit form from its dashboard button.
+addHabitButton.addEventListener("click", function () {
+    // Toggle the form without changing the saved habit list.
+    addHabitPanel.hidden = !addHabitPanel.hidden;
+    // Focus the name field when the form becomes visible.
+    if (!addHabitPanel.hidden) {
+        habitNameInput.focus();
+    }
+});
+
+// Open the Home section from desktop or mobile navigation.
+navHomeButton.addEventListener("click", function () {
+    // Display the private habit dashboard.
+    showSection("home");
+});
+mobileNavHomeButton.addEventListener("click", function () {
+    // Display the private habit dashboard.
+    showSection("home");
+});
+
+// Open the Stats section from desktop or mobile navigation.
+navStatsButton.addEventListener("click", function () {
+    // Display the private analytics.
+    showSection("stats");
+});
+mobileNavStatsButton.addEventListener("click", function () {
+    // Display the private analytics.
+    showSection("stats");
+});
+
+// Open Settings from the sidebar, bottom navigation, or mobile gear.
+navSettingsButton.addEventListener("click", function () {
+    // Display account and admin settings.
+    showSection("settings");
+});
+mobileNavSettingsButton.addEventListener("click", function () {
+    // Display account and admin settings.
+    showSection("settings");
+});
+mobileSettingsButton.addEventListener("click", function () {
+    // Display account and admin settings.
+    showSection("settings");
+});
+
+// Redraw the Home chart when its measure changes.
+homeChartMetricSelect.addEventListener("change", function () {
+    // Find the account whose chart should be refreshed.
+    const user = getActiveUser();
+    if (user !== null) {
+        // Show the newly selected Home chart measure.
+        renderWeeklyChart(user);
+    }
+});
+
+// Redraw the Stats chart when its view changes.
+statsChartViewSelect.addEventListener("change", function () {
+    // Find the account whose chart should be refreshed.
+    const user = getActiveUser();
+    if (user !== null) {
+        // Show daily habits or the current week.
+        renderStatsChart(user);
+    }
+});
+
+// Redraw the Stats chart when its measure changes.
+statsChartMetricSelect.addEventListener("change", function () {
+    // Find the account whose chart should be refreshed.
+    const user = getActiveUser();
+    if (user !== null) {
+        // Show progress or focus minutes.
+        renderStatsChart(user);
+    }
 });
 
 // Show the sign-up tab when its tab button is selected.
@@ -1057,6 +1642,9 @@ showLoginButton.addEventListener("click", function () {
 userLogoutButton.addEventListener("click", function () {
     // Clear the active account email.
     activeUserEmail = "";
+    sessionStorage.removeItem(ACTIVE_USER_STORAGE_KEY);
+    adminLoggedIn = false;
+    currentSection = "home";
 
     // Return to the normal sign-up and login route.
     window.location.hash = "";
@@ -1126,8 +1714,46 @@ window.addEventListener("hashchange", function () {
     renderPage();
 });
 
+// Refresh accounts changed by another tab in this same browser.
+window.addEventListener("storage", function (event) {
+    // Reload account data after another tab saves or clears it.
+    if (event.key === USERS_STORAGE_KEY || event.key === null) {
+        // Read the latest account list from this browser's storage.
+        const latestUsersText = localStorage.getItem(USERS_STORAGE_KEY);
+        users = latestUsersText === null ? [] : JSON.parse(latestUsersText);
+
+        // Prepare each account's chart values for the current week.
+        for (let i = 0; i < users.length; i++) {
+            // Keep each account's Monday-to-Sunday arrays ready.
+            prepareWeeklyData(users[i], new Date());
+        }
+
+        // End a tab session when its user was removed elsewhere.
+        if (activeUserEmail !== "" && findUserIndex(activeUserEmail) === -1) {
+            // Clear the removed account from this tab.
+            activeUserEmail = "";
+            sessionStorage.removeItem(ACTIVE_USER_STORAGE_KEY);
+        }
+
+        // Redraw the active user's own data.
+        renderPage();
+    }
+
+    // Update the admin password after another tab changes it.
+    if (event.key === ADMIN_STORAGE_KEY || event.key === null) {
+        // Restore the saved value or the demo default.
+        const latestAdminPassword = localStorage.getItem(ADMIN_STORAGE_KEY);
+        adminPassword = latestAdminPassword === null ? DEFAULT_ADMIN_PASSWORD : latestAdminPassword;
+        adminLoggedIn = false;
+        renderPage();
+    }
+});
+
 // Show the sign-up, login, user, or admin view when the page loads.
 renderPage();
 
 // Update the active user's countdown once each second.
 setInterval(updateResetTimer, 1000);
+
+// Update the time-based greeting once each minute.
+setInterval(updateTimeGreeting, 60000);
