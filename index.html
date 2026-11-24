@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Habit &amp; Daily Focus Streak Tracker</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <main class="page">
+        <header class="page-header">
+            <p class="eyebrow">Milestone 5</p>
+            <h1>Habit &amp; Daily Focus Streak Tracker</h1>
+            <p class="intro">Sign in to keep your habits and focus streaks in your own account.</p>
+        </header>
+
+        <section id="auth-view" class="card">
+            <div class="auth-tabs">
+                <button id="show-signup" class="tab-button selected-tab" type="button">Sign Up</button>
+                <button id="show-login" class="tab-button" type="button">Login</button>
+            </div>
+
+            <form id="signup-form" class="auth-form">
+                <h2>Create an account</h2>
+                <label for="signup-name">Name</label>
+                <input id="signup-name" type="text" maxlength="60" required>
+                <label for="signup-email">Email</label>
+                <input id="signup-email" type="email" required>
+                <label for="signup-password">Password</label>
+                <input id="signup-password" type="password" required>
+                <button type="submit">Sign Up</button>
+                <p id="signup-message" class="message" aria-live="polite"></p>
+            </form>
+
+            <form id="login-form" class="auth-form" hidden>
+                <h2>Login to your account</h2>
+                <label for="login-email">Email</label>
+                <input id="login-email" type="email" required>
+                <label for="login-password">Password</label>
+                <input id="login-password" type="password" required>
+                <button type="submit">Login</button>
+                <p id="login-message" class="message" aria-live="polite"></p>
+            </form>
+
+            <p class="admin-link-row"><a href="#/admin">Open Admin Login</a></p>
+            <p class="demo-note">Class demo only: accounts are stored in this browser and are not protected for real-world use.</p>
+        </section>
+
+        <section id="user-view" hidden>
+            <div class="user-header card">
+                <div>
+                    <p class="eyebrow">Your private habit space</p>
+                    <h2>Welcome, <span id="current-user-name"></span></h2>
+                </div>
+                <div class="header-actions">
+                    <a class="button-link secondary-link" href="#/admin">Admin</a>
+                    <button id="user-logout" class="secondary-button" type="button">Logout</button>
+                </div>
+            </div>
+
+            <section class="card">
+                <div class="section-heading">
+                    <div>
+                        <h2>Your Daily Summary</h2>
+                        <p id="user-habit-count" class="muted-text"></p>
+                    </div>
+                    <button id="finish-day-button" class="finish-day-button" type="button">Finish Day / Next Day</button>
+                </div>
+                <p id="user-status-message" class="status-message" aria-live="polite"></p>
+
+                <div class="timer-card">
+                    <strong>Daily reset time: 12:00 AM local time</strong>
+                    <p id="reset-countdown" class="reset-countdown">Finish Day to schedule an automatic reset.</p>
+                </div>
+
+                <div class="score-box">
+                    <h3>Today's Productivity Score</h3>
+                    <div class="score-grid">
+                        <p class="score-item">
+                            <span class="score-label">Completed Habits</span>
+                            <strong id="score-completed" class="score-value">0 / 0</strong>
+                        </p>
+                        <p class="score-item">
+                            <span class="score-label">Focus Minutes Earned</span>
+                            <strong id="score-minutes" class="score-value">0 / 0</strong>
+                        </p>
+                        <p class="score-item">
+                            <span class="score-label">Percentage Score</span>
+                            <strong id="score-percentage" class="score-value">0.0%</strong>
+                        </p>
+                    </div>
+                </div>
+
+                <div class="smart-summary">
+                    <h3>Smart Summary</h3>
+                    <div class="smart-grid">
+                        <p class="smart-item">
+                            <span class="smart-label">Pending Habits</span>
+                            <strong id="smart-pending-count" class="smart-value">0</strong>
+                        </p>
+                        <p class="smart-item">
+                            <span class="smart-label">Highest-Priority Pending Habit</span>
+                            <strong id="smart-priority" class="smart-value">None</strong>
+                        </p>
+                    </div>
+                    <div class="recursive-panel">
+                        <strong>Recursive Pending Breakdown</strong>
+                        <p id="smart-breakdown" class="smart-breakdown">No pending habits.</p>
+                    </div>
+                </div>
+
+                <div class="streak-row">
+                    <div class="streak-badge">
+                        <span class="streak-label">Current Streak</span>
+                        <strong id="current-streak" class="streak-value">0 days</strong>
+                    </div>
+                    <div class="streak-badge">
+                        <span class="streak-label">Best Streak</span>
+                        <strong id="best-streak" class="streak-value">0 days</strong>
+                    </div>
+                    <div class="streak-badge">
+                        <span class="streak-label">Days Logged</span>
+                        <strong id="days-logged" class="streak-value">0</strong>
+                    </div>
+                </div>
+            </section>
+
+            <section class="card">
+                <h2>Add a habit</h2>
+                <form id="habit-form">
+                    <div class="habit-form-grid">
+                        <div>
+                            <label for="habit-input">Habit name</label>
+                            <input id="habit-input" type="text" maxlength="39" required>
+                        </div>
+                        <div>
+                            <label for="target-minutes-input">Target minutes</label>
+                            <input id="target-minutes-input" type="number" min="1" step="1" value="30" required>
+                        </div>
+                        <button type="submit">Add habit</button>
+                    </div>
+                    <p id="habit-message" class="message" aria-live="polite"></p>
+                </form>
+            </section>
+
+            <section class="card">
+                <h2>Your habits</h2>
+                <ul id="habit-list" class="habit-list"></ul>
+            </section>
+        </section>
+
+        <section id="admin-view" class="card" hidden>
+            <div class="section-heading">
+                <div>
+                    <p class="eyebrow">Restricted demo panel</p>
+                    <h2>Admin Panel</h2>
+                </div>
+                <a class="button-link secondary-link" href="#">Back to Tracker</a>
+            </div>
+
+            <form id="admin-login-form" hidden>
+                <h3>Admin Login</h3>
+                <label for="admin-password-input">Admin password</label>
+                <input id="admin-password-input" type="password" required>
+                <button type="submit">Unlock Admin Panel</button>
+                <p id="admin-login-message" class="message" aria-live="polite"></p>
+            </form>
+
+            <div id="admin-panel" hidden>
+                <div class="section-heading">
+                    <h3>User Accounts</h3>
+                    <button id="admin-logout" class="secondary-button" type="button">Admin Logout</button>
+                </div>
+                <p class="muted-text">Only account names and emails are shown here.</p>
+                <ul id="admin-user-list" class="admin-user-list"></ul>
+
+                <form id="admin-password-form" class="admin-password-form">
+                    <h3>Change Admin Password</h3>
+                    <label for="new-admin-password">New password</label>
+                    <input id="new-admin-password" type="password" required>
+                    <button type="submit">Update Password</button>
+                    <p id="admin-password-message" class="message" aria-live="polite"></p>
+                </form>
+            </div>
+        </section>
+    </main>
+    <script src="script.js"></script>
+</body>
+</html>
